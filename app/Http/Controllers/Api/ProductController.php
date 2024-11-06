@@ -6,29 +6,18 @@ use App\Models\Image;
 use App\Models\Product;
 use Illuminate\Http\Request;
 use App\Models\ProductCategory;
+use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use App\Http\Controllers\Controller;
 use App\Http\Resources\ProductResource;
+use Illuminate\Support\Facades\Storage;
 use Illuminate\Validation\ValidationException;
-use Illuminate\Http\JsonResponse;
+use Illuminate\Database\Eloquent\ModelNotFoundException;
 use Illuminate\Http\Resources\Json\AnonymousResourceCollection;
 
 class ProductController extends Controller
 {
-    /**
-     * Display a listing of the resource.
-     */
-    // public function index()
-    // {
-    //     $products = Product::with(['categories', 'images'])->get();
-
-    //     if ($products->isEmpty()) {
-    //         return response()->json(['message' => 'No products found'], 200);
-    //     }
-
-    //     return ProductResource::collection($products); // Return dalam bentuk resource
-    // }
     public function index()
     {
         // Mengambil semua produk beserta gambar yang terkait
@@ -39,52 +28,6 @@ class ProductController extends Controller
             'data' => $products
         ], 200);
     }
-
-
-    // public function store(Request $request)
-    // {
-    //     // Validasi data
-    //     $validatedData = $request->validate([
-    //         'title' => 'required|string|max:255',
-    //         'description' => 'required|string',
-    //         'price' => 'required|numeric',
-    //         'location' => 'required|string|max:255',
-    //         'type' => 'required|string|max:50',
-    //         'status' => 'required|in:available,sold',
-    //         'category_id' => 'required|exists:categories,id',
-    //     ]);
-
-    //     DB::beginTransaction();
-
-    //     try {
-    //         // Simpan data ke database tabel `products`
-    //         $product = Product::create($validatedData);
-
-    //         // Simpan data ke tabel `property_categories`
-    //         ProductCategory::create([
-    //             'property_id' => $product->id,
-    //             'category_id' => $request->input('category_id') // ID kategori yang dipilih oleh user
-
-    //         ]);
-
-    //         // Commit transaksi jika semuanya sukses
-    //         DB::commit();
-
-    //         // Return respon sukses
-    //         return response()->json([
-    //             'message' => 'Product created successfully',
-    //             'data' => $product
-    //         ], 201);
-    //     } catch (\Exception $e) {
-    //         // Rollback jika terjadi error
-    //         DB::rollBack();
-
-    //         return response()->json([
-    //             'message' => 'Failed to create product',
-    //             'error' => $e->getMessage()
-    //         ], 500);
-    //     }
-    // }
 
     public function store(Request $request)
     {
@@ -153,40 +96,6 @@ class ProductController extends Controller
         }
     }
 
-
-    // public function uploadImages(Request $request, Product $product)
-    // {
-    //     $request->validate([
-    //         'images.*' => 'required|image|mimes:jpeg,png,jpg,gif|max:4096',
-    //     ]);
-
-    //     $images = $request->file('images');
-
-    //     try {
-    //         foreach ($images as $image) {
-
-    //             $path = $image->store('images', 'public');
-
-    //             // Simpan path gambar ke tabel `images`
-    //             Image::create([
-    //                 'product_id' => $product->id,
-    //                 'image_path' => $path
-    //             ]);
-    //         }
-
-    //         return response()->json([
-    //             'message' => 'Images uploaded successfully',
-    //             'product' => $product,
-    //         ], 201);
-    //     } catch (\Exception $e) {
-    //         Log::error('Image upload failed: ' . $e->getMessage());
-    //         return response()->json([
-    //             'message' => 'Image upload failed',
-    //             'error' => $e->getMessage(),
-    //         ], 500);
-    //     }
-    // }
-
     // public function storeImage(Request $request)
     // {
     //     try {
@@ -231,7 +140,7 @@ class ProductController extends Controller
 
     public function search($title = null, $location = null, $status = null)
     {
-        $query = Product::query();
+        $query = Product::with('images'); // Memuat relasi images
 
         if ($title) {
             $query->where('title', 'like', '%' . $title . '%');
@@ -247,51 +156,139 @@ class ProductController extends Controller
 
         $properties = $query->get();
 
-        return response()->json($properties);
+        return response()->json($properties, 200, [], JSON_PRETTY_PRINT);
     }
+
+
+    // public function update(Request $request, $id)
+    // {
+    //     // Validasi Input
+    //     $validatedData = $request->validate([
+    //         'title' => 'required|string|max:255',
+    // 'description' => 'required|string',
+    // 'price' => 'required|numeric|decimal:0,2',
+    // 'location' => 'required|string|max:255',
+    // 'type' => 'required|string|max:50',
+    // 'status' => 'required|in:available,sold',
+    // 'category_id' => 'required|exists:categories,id',
+    // 'image_path' => 'required|array',
+    // 'image_path.*' => 'file|mimes:jpeg,png,jpg,gif|max:4096'
+    //     ]);
+
+    //     // Cari Properti berdasarkan ID
+    //     $property = Product::findOrFail($id);
+
+    //     // Update Properti
+    //     $property->update($validatedData);
+
+    //     // Update Kategori Properti
+    //     if ($request->has('category_id')) {
+    //         $property->category()->sync($request->category_id);
+    //     }
+
+    //     // Update Gambar Properti
+    //     if ($request->hasFile('images')) {
+    //         foreach ($request->file('images') as $image) {
+    //             $imagePath = $image->store('property_images', 'public');
+    //             Image::create([
+    //                 'product_id' => $property->id,
+    //                 'url' => $imagePath,
+    //                 'alt_text' => $property->title
+    //             ]);
+    //         }
+    //     }
+
+    //     return response()->json(['message' => 'Property updated successfully', 'data' => $property], 200);
+    // }
 
     public function update(Request $request, $id)
     {
-        // Validasi Input
-        $validatedData = $request->validate([
-            'title' => 'sometimes|required|string|max:255',
-            'description' => 'sometimes|required|string',
-            'price' => 'sometimes|required|numeric',
-            'location' => 'sometimes|required|string',
-            'type' => 'sometimes|required|string',
-            'status' => 'sometimes|required|in:available,sold',
-            'category_id' => 'sometimes|required|array',
-            'category_id.*' => 'exists:categories,id',
-            'images' => 'sometimes|array',
-            'images.*' => 'image|mimes:jpeg,png,jpg,gif|max:2048',
-        ]);
+        try {
+            // Cek apakah property ada
+            $property = Product::findOrFail($id);
 
-        // Cari Properti berdasarkan ID
-        $property = Product::findOrFail($id);
+            // Validasi yang lebih fleksibel untuk update
+            $validatedData = $request->validate([
+                'title' => 'sometimes|required|string|max:255',
+                'description' => 'sometimes|required|string',
+                'price' => 'sometimes|required|numeric|decimal:0,2',
+                'location' => 'sometimes|required|string|max:255',
+                'type' => 'sometimes|required|string|max:50',
+                'status' => 'sometimes|required|in:available,sold',
+                'category_id' => 'sometimes|required|exists:categories,id',
+                'image_path' => 'sometimes|array',
+                'image_path.*' => 'sometimes|file|mimes:jpeg,png,jpg,gif|max:4096'
+            ]);
 
-        // Update Properti
-        $property->update($validatedData);
+            DB::beginTransaction();
 
-        // Update Kategori Properti
-        if ($request->has('category_id')) {
-            $property->category()->sync($request->category_id);
-        }
+            // Update hanya field yang ada dalam request
+            if ($request->has('title')) $property->title = $validatedData['title'];
+            if ($request->has('description')) $property->description = $validatedData['description'];
+            if ($request->has('price')) $property->price = $validatedData['price'];
+            if ($request->has('location')) $property->location = $validatedData['location'];
+            if ($request->has('type')) $property->type = $validatedData['type'];
+            if ($request->has('status')) $property->status = $validatedData['status'];
 
-        // Update Gambar Properti
-        if ($request->hasFile('images')) {
-            foreach ($request->file('images') as $image) {
-                $imagePath = $image->store('property_images', 'public');
-                Image::create([
-                    'product_id' => $property->id,
-                    'url' => $imagePath,
-                    'alt_text' => $property->title
+            $property->save();
+
+            // Update category jika ada
+            if ($request->has('category_id')) {
+                ProductCategory::where('property_id', $id)->delete();
+                ProductCategory::create([
+                    'property_id' => $id,
+                    'category_id' => $validatedData['category_id']
                 ]);
             }
+
+            // Update images jika ada
+            if ($request->hasFile('image_path')) {
+                // Hapus gambar lama
+                foreach ($property->images as $oldImage) {
+                    Storage::disk('public')->delete($oldImage->image_path);
+                    $oldImage->delete();
+                }
+
+                // Upload gambar baru
+                foreach ($request->file('image_path') as $image) {
+                    $path = $image->store('images', 'public');
+                    Image::create([
+                        'property_id' => $id,
+                        'image_path' => $path
+                    ]);
+                }
+            }
+
+            DB::commit();
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Property updated successfully',
+                'data' => $property->load('images', 'categories')
+            ], 200);
+        } catch (ValidationException $e) {
+            DB::rollBack();
+            return response()->json([
+                'success' => false,
+                'message' => 'Validation failed',
+                'errors' => $e->errors(),
+                'request_data' => $request->all() // Untuk debugging
+            ], 422);
+        } catch (ModelNotFoundException $e) {
+            DB::rollBack();
+            return response()->json([
+                'success' => false,
+                'message' => 'Property not found'
+            ], 404);
+        } catch (\Exception $e) {
+            DB::rollBack();
+            return response()->json([
+                'success' => false,
+                'message' => 'Failed to update property',
+                'error' => $e->getMessage()
+            ], 500);
         }
-
-        return response()->json(['message' => 'Property updated successfully', 'data' => $property], 200);
     }
-
 
     /**
      * Remove the specified resource from storage.

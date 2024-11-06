@@ -25,17 +25,29 @@ class Product extends Model
         'status',
     ];
 
-    // Tentukan hubungan dengan model Category (misalnya, jika ada)
-    public function categories()
-    {
-        return $this->belongsToMany(Category::class, 'property_categories');
-    }
+     // Relasi dengan tabel 'property_categories' untuk kategori
+     public function categories()
+     {
+         return $this->belongsToMany(Category::class, 'property_categories', 'property_id', 'category_id');
+     }
+ 
+     // Relasi dengan tabel 'property_images' untuk gambar
+     public function images()
+     {
+         return $this->hasMany(Image::class, 'property_id');
+     }
 
-    // Contoh relasi jika produk memiliki banyak gambar
-    public function images()
-    {
-        return $this->hasMany(Image::class);
-    }
+    // Tentukan hubungan dengan model Category (misalnya, jika ada)
+    // public function categories()
+    // {
+    //     return $this->belongsToMany(Category::class, 'property_categories');
+    // }
+
+    // // Contoh relasi jika produk memiliki banyak gambar
+    // public function images()
+    // {
+    //     return $this->hasMany(Image::class);
+    // }
 
     // Contoh relasi jika produk memiliki banyak ulasan
     // public function reviews()

@@ -7,24 +7,39 @@ use App\Models\Product;
 use Illuminate\Http\Request;
 use App\Models\ProductCategory;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
 use App\Http\Controllers\Controller;
 use App\Http\Resources\ProductResource;
+use Illuminate\Validation\ValidationException;
+use Illuminate\Http\JsonResponse;
+use Illuminate\Http\Resources\Json\AnonymousResourceCollection;
 
 class ProductController extends Controller
 {
     /**
      * Display a listing of the resource.
      */
+    // public function index()
+    // {
+    //     $products = Product::with(['categories', 'images'])->get();
+
+    //     if ($products->isEmpty()) {
+    //         return response()->json(['message' => 'No products found'], 200);
+    //     }
+
+    //     return ProductResource::collection($products); // Return dalam bentuk resource
+    // }
     public function index()
     {
-        $products = Product::all(); // Mengambil semua produk
+        // Mengambil semua produk beserta gambar yang terkait
+        $products = Product::with('images')->get();
 
-        if ($products->isEmpty()) {
-            return response()->json(['message' => 'No products found'], 200);
-        }
-
-        return ProductResource::collection($products); // Return dalam bentuk resource
+        return response()->json([
+            'message' => 'Product list with images',
+            'data' => $products
+        ], 200);
     }
+
 
     // public function store(Request $request)
     // {
@@ -36,66 +51,184 @@ class ProductController extends Controller
     //         'location' => 'required|string|max:255',
     //         'type' => 'required|string|max:50',
     //         'status' => 'required|in:available,sold',
+    //         'category_id' => 'required|exists:categories,id',
     //     ]);
 
-    //     // Simpan data ke database
-    //     $product = Product::create($validatedData);
+    //     DB::beginTransaction();
 
-    //     // Return respon sukses
-    //     return response()->json([
-    //         'message' => 'Product created successfully',
-    //         'data' => $product
-    //     ], 201);
+    //     try {
+    //         // Simpan data ke database tabel `products`
+    //         $product = Product::create($validatedData);
+
+    //         // Simpan data ke tabel `property_categories`
+    //         ProductCategory::create([
+    //             'property_id' => $product->id,
+    //             'category_id' => $request->input('category_id') // ID kategori yang dipilih oleh user
+
+    //         ]);
+
+    //         // Commit transaksi jika semuanya sukses
+    //         DB::commit();
+
+    //         // Return respon sukses
+    //         return response()->json([
+    //             'message' => 'Product created successfully',
+    //             'data' => $product
+    //         ], 201);
+    //     } catch (\Exception $e) {
+    //         // Rollback jika terjadi error
+    //         DB::rollBack();
+
+    //         return response()->json([
+    //             'message' => 'Failed to create product',
+    //             'error' => $e->getMessage()
+    //         ], 500);
+    //     }
     // }
 
     public function store(Request $request)
     {
-        // Validasi data
-        $validatedData = $request->validate([
-            'title' => 'required|string|max:255',
-            'description' => 'required|string',
-            'price' => 'required|numeric',
-            'location' => 'required|string|max:255',
-            'type' => 'required|string|max:50',
-            'status' => 'required|in:available,sold',
-            'category_id' => 'required|exists:categories,id'
-        ]);
-
-        DB::beginTransaction();
-
         try {
-            // Simpan data ke database tabel `products`
-            $product = Product::create($validatedData);
-
-            // Simpan data ke tabel `property_categories`
-            ProductCategory::create([
-                'property_id' => $product->id,
-                'category_id' => $request->input('category_id') // ID kategori yang dipilih oleh user
-
+            // Validasi data input
+            $validatedData = $request->validate([
+                'title' => 'required|string|max:255',
+                'description' => 'required|string',
+                'price' => 'required|numeric|decimal:0,2',
+                'location' => 'required|string|max:255',
+                'type' => 'required|string|max:50',
+                'status' => 'required|in:available,sold',
+                'category_id' => 'required|exists:categories,id',
+                'image_path' => 'required|array',
+                'image_path.*' => 'file|mimes:jpeg,png,jpg,gif|max:4096'
             ]);
 
-            // Commit transaksi jika semuanya sukses
+            DB::beginTransaction();
+
+            // Simpan data produk
+            $property = Product::create($validatedData);
+
+            // Simpan kategori produk
+            ProductCategory::create([
+                'property_id' => $property->id,
+                'category_id' => $request->input('category_id')
+            ]);
+
+            // Simpan gambar
+            if ($request->hasFile('image_path')) {
+                foreach ($request->file('image_path') as $image) {
+                    $path = $image->store('images', 'public');
+
+                    Image::create([
+                        'property_id' => $property->id,
+                        'image_path' => $path
+                    ]);
+                }
+            } else {
+                throw new \Exception("No images found in request");
+            }
+
             DB::commit();
 
-            // Return respon sukses
             return response()->json([
-                'message' => 'Product created successfully',
-                'data' => $product
-            ], 201);
-        } catch (\Exception $e) {
-            // Rollback jika terjadi error
-            DB::rollBack();
+                'success' => true,
+                'message' => 'Property created successfully',
+                'data' => $property->load('images', 'categories')
+            ], 201); // Created status code
 
+        } catch (ValidationException $e) {
+            DB::rollBack();
             return response()->json([
-                'message' => 'Failed to create product',
+                'success' => false,
+                'message' => 'Validation failed',
+                'errors' => $e->errors()
+            ], 422); // Unprocessable Entity
+
+        } catch (\Exception $e) {
+            DB::rollBack();
+            return response()->json([
+                'success' => false,
+                'message' => 'Failed to create property',
                 'error' => $e->getMessage()
-            ], 500);
+            ], 500); // Internal Server Error
         }
     }
 
-    /**
-     * Display the specified resource.
-     */
+
+    // public function uploadImages(Request $request, Product $product)
+    // {
+    //     $request->validate([
+    //         'images.*' => 'required|image|mimes:jpeg,png,jpg,gif|max:4096',
+    //     ]);
+
+    //     $images = $request->file('images');
+
+    //     try {
+    //         foreach ($images as $image) {
+
+    //             $path = $image->store('images', 'public');
+
+    //             // Simpan path gambar ke tabel `images`
+    //             Image::create([
+    //                 'product_id' => $product->id,
+    //                 'image_path' => $path
+    //             ]);
+    //         }
+
+    //         return response()->json([
+    //             'message' => 'Images uploaded successfully',
+    //             'product' => $product,
+    //         ], 201);
+    //     } catch (\Exception $e) {
+    //         Log::error('Image upload failed: ' . $e->getMessage());
+    //         return response()->json([
+    //             'message' => 'Image upload failed',
+    //             'error' => $e->getMessage(),
+    //         ], 500);
+    //     }
+    // }
+
+    // public function storeImage(Request $request)
+    // {
+    //     try {
+    //         $request->validate([
+    //             'image_path' => 'required',
+    //             'property_id' => 'required|exists:properties,id',
+    //         ]);
+    //         $imageName = time() . '.' . $request->image->extension();
+    //         $imagePath = 'images/' . $imageName;
+    //         $request->image->move(public_path('images'), $imageName);
+
+    //         $product = new Product();
+
+    //         $product->image = $imagePath;
+    //         $product->image_path = $imagePath; // Store the file path
+    //         $product->property_id = $request->property_id; // Set the property_id foreign key
+    //         $product->save();
+
+    //         return response()->json([
+    //             'success' => true,
+    //             'message' => 'Product image uploaded successfully.',
+    //             'data' => [
+    //                 'product_id' => $product->id,
+    //                 'image_path' => $product->image_path,
+    //                 'property_id' => $product->property_id,
+    //             ]
+    //         ], 201);
+    //     } catch (\Illuminate\Validation\ValidationException $e) {
+    //         return response()->json([
+    //             'success' => false,
+    //             'message' => 'Validation failed.',
+    //             'errors' => $e->errors(),
+    //         ], 422);
+    //     } catch (\Exception $e) {
+    //         return response()->json([
+    //             'success' => false,
+    //             'message' => 'An error occurred while processing your request.',
+    //             'error' => $e->getMessage(),
+    //         ], 500);
+    //     }
+    // }
+
     public function search($title = null, $location = null, $status = null)
     {
         $query = Product::query();
@@ -116,11 +249,6 @@ class ProductController extends Controller
 
         return response()->json($properties);
     }
-
-    // public function edit(string $id)
-    // {
-    //     //
-    // }
 
     public function update(Request $request, $id)
     {
